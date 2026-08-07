@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: posts
+  labels:
+    app: posts
+spec:
+  type: ClusterIP
+  selector:
+    app: posts
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP

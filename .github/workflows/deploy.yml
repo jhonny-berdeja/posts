@@ -1,0 +1,88 @@
+name: Deploy posts
+
+on:
+  push:
+    branches: [master]
+
+concurrency:
+  group: deploy-posts-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and push image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/posts:${{ github.sha }}
+
+  deploy:
+    name: Deploy to pcbox microk8s
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Join tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TAILSCALE_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TAILSCALE_OAUTH_CLIENT_SECRET }}
+          tags: tag:continuous-integration
+
+      - name: Write kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG_PCBOX }}" > ~/.kube/config
+          chmod 600 ~/.kube/config
+
+      - name: Verify cluster reachability
+        # Fails fast if the tailnet/API precondition isn't met, before
+        # attempting any apply (spec: Infra Precondition Flag).
+        run: kubectl get nodes
+
+      - name: Prepare manifests
+        run: |
+          mkdir -p /tmp/posts-manifests
+          cp kubernetes/manifests/*.yaml /tmp/posts-manifests/
+          sed -i \
+            -e "s|TU-USUARIO|${{ secrets.DOCKERHUB_USERNAME }}|g" \
+            -e "s|IMAGE_TAG|${{ github.sha }}|g" \
+            /tmp/posts-manifests/deployment.yaml
+
+      - name: Apply manifests
+        run: kubectl apply -f /tmp/posts-manifests/
+
+      - name: Wait for rollout
+        run: kubectl rollout status deployment/posts --timeout=180s
+
+      - name: Verify deployment
+        run: |
+          kubectl get deployment posts
+          kubectl get pods -l app=posts
+          kubectl get service posts
+          echo "Deployed image:"
+          kubectl get deployment posts -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'
+
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          kubectl describe deployment posts || true
+          kubectl get events --sort-by=.lastTimestamp | tail -n 50 || true
