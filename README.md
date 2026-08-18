@@ -1,98 +1,35 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# posts
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+## ¿Para qué es este proyecto?
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+Este repositorio es la base del servicio de posts del ecosistema jtagram, construido con NestJS. A diferencia de otros repos del ecosistema, todavía es un scaffold recién generado por el Nest CLI: no tiene ninguna funcionalidad de negocio implementada. `src/` contiene únicamente el `AppController` y el `AppService` por defecto (el endpoint `GET /` que devuelve `"Hello World!"`), sin módulos propios del dominio de posts.
 
-## Description
+## ¿Qué hace cada módulo?
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+Todavía no existen módulos propios de negocio. El único módulo presente es el `AppModule` por defecto que registra el `AppController` y el `AppService` generados por el scaffold de Nest. No hay carpeta `src/modules/` ni ninguna otra división funcional por el momento.
 
-## Project setup
+## ¿Qué variables de entorno necesito?
 
-```bash
-$ npm install
-```
+### Variables para el pipeline de GitHub Actions
 
-## Compile and run the project
+Este repo no separa release y deploy: `.github/workflows/deploy.yml` es un único workflow que se dispara con push a `master` y hace build, push de la imagen y deploy en un solo job encadenado. Las variables/secretos que usa son:
 
-```bash
-# development
-$ npm run start
+- **`DOCKERHUB_USERNAME` y `DOCKERHUB_TOKEN`**: se usan juntas para autenticar contra Docker Hub (`docker/login-action`) y publicar la imagen `posts` en cada deploy. `DOCKERHUB_USERNAME` es el usuario u organización de Docker Hub bajo la que se publica la imagen; `DOCKERHUB_TOKEN` es un access token generado desde Account Settings > Security > New Access Token en Docker Hub, con permisos de lectura y escritura. Detalle completo en `.github/workflows/obtain-secrets.md`.
+- **`TS_OAUTH_CLIENT_ID` y `TS_OAUTH_SECRET`**: se usan juntas para unir el runner a la tailnet (`tailscale/github-action`) y así poder llegar al API server de microk8s en pcbox. Se obtienen creando un cliente OAuth en la consola de administración de Tailscale, con scope `Devices: Write` y el tag `tag:continuous-integration`.
+- **`KUBECONFIG_PCBOX`**: contenido crudo (no en base64) del kubeconfig usado para autenticar `kubectl` contra el cluster de microk8s en pcbox. El workflow lo escribe directo a `~/.kube/config`. El procedimiento para generarlo, incluyendo el ajuste del certificado del API server y del campo `server:` para apuntar a la IP de Tailscale, está documentado paso a paso en `.github/workflows/obtain-secrets.md`.
 
-# watch mode
-$ npm run start:dev
+El archivo `.github/workflows/env.secrets.example` lista estas mismas variables como referencia rápida para cargarlas como secretos del repositorio en GitHub (Settings > Secrets and variables > Actions).
 
-# production mode
-$ npm run start:prod
-```
+### Variables para el funcionamiento de la app
 
-## Run tests
+Por ahora la app en runtime solo lee `PORT` (en `src/main.ts`, con fallback a `3000` si no está definida). No hay ningún archivo de ejemplo de variables de entorno de aplicación (`.env.example` o similar) en el repo, ni un `ConfigModule` configurado en `app.module.ts`: al no existir todavía funcionalidad de negocio, tampoco hay necesidad de configuración adicional.
 
-```bash
-# unit tests
-$ npm run test
+## ¿Cómo se ejecuta la app?
 
-# e2e tests
-$ npm run test:e2e
+A diferencia de otros repos del ecosistema, `posts` no tiene un workflow manual con inputs de tags ni pasa por `infra-hub`. El deploy es automático: cada push a `master` dispara `.github/workflows/deploy.yml`, que en un solo workflow:
 
-# test coverage
-$ npm run test:cov
-```
+1. Construye la imagen Docker y la publica en Docker Hub, taggeada con el SHA del commit.
+2. Se conecta al cluster de microk8s en pcbox uniendo el runner a la tailnet vía Tailscale.
+3. Aplica los manifiestos de `kubernetes/manifests/` (reemplazando el usuario de Docker Hub y el tag de imagen) y espera a que el rollout del deployment `posts` termine correctamente.
 
-## Deployment
-
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
-
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
-
-```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
-```
-
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
-
-## Resources
-
-Check out a few resources that may come in handy when working with NestJS:
-
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
-
-## Support
-
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
-
-## Stay in touch
-
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
-
-## License
-
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+No hay paso de aprobación ni selección de versión: el flujo completo, de commit a pod corriendo en pcbox, ocurre sin intervención manual.
